@@ -1,0 +1,74 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:?Set MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set MONGO_PASSWORD}
+
+    volumes:
+      - mongo-data:/data/db
+
+    networks:
+      - chat-network
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet
+          --host 127.0.0.1
+          --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)"
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    build:
+      context: ./backend
+    image: chatapp-backend:multistage
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    environment:
+      PORT: "5001"
+      NODE_ENV: production
+      MONGODB_URI: "mongodb://${MONGO_USERNAME:?Set MONGO_USERNAME}:${MONGO_PASSWORD:?Set MONGO_PASSWORD}@mongodb:27017/chatapp?authSource=admin"
+
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+    networks:
+      - chat-network
+
+  frontend:
+    build:
+      context: ./frontend
+    image: chatapp-frontend:nginx
+    restart: unless-stopped
+
+    ports:
+      - "5173:80"
+
+    depends_on:
+      backend:
+        condition: service_started
+        restart: true
+
+    networks:
+      - chat-network
+
+volumes:
+  mongo-data:
+
+networks:
+  chat-network:
+    driver: bridge
